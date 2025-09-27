@@ -24,8 +24,10 @@ on:
         default: false
 
 jobs:
+  # ===== CLEAN JOB (MODIFIÉ) =====
   clean:
     runs-on: ubuntu-latest
+    # Le clean s'exécute uniquement si build_android EST demandée ET clean_cache EST coché.
     if: ${{ inputs.build_android && inputs.clean_cache }}
     steps:
       - name: 🧹 • Clean Gradle Cache
@@ -34,9 +36,10 @@ jobs:
           rm -rf $HOME/.gradle/caches/
           rm -rf node_modules
 
-  # ===== ANDROID BUILD =====
+  # ===== ANDROID BUILD - OPTIMISÉ ET CORRIGÉ =====
   build_android:
-    needs: ${{ inputs.clean_cache && 'clean' || '' }}
+    # CORRECTION APPLIQUÉE ICI pour la dépendance conditionnelle
+    needs: ${{ fromJson(format('{0}', inputs.clean_cache && '["clean"]' || '[]')) }}
     runs-on: ubuntu-latest
     if: ${{ inputs.build_android }}
     steps:
@@ -54,6 +57,7 @@ jobs:
       - name: 🔨 • Prebuild Android
         run: npx expo prebuild -p android --clean
 
+      # NOUVELLE ÉTAPE CLÉ POUR LA VITESSE : Cache Gradle
       - name: 📦 • Cache Gradle Dependencies
         uses: actions/cache@v4
         with:
@@ -63,9 +67,11 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+        # Le cache est ignoré si l'utilisateur a demandé de ne pas l'utiliser (et le clean job a déjà fait le ménage)
         if: ${{ !inputs.clean_cache }}
 
-      - name: ☕ • Setup Java & Optimize Gradle
+      # NOUVELLE ÉTAPE CLÉ POUR LA VITESSE : Setup Java + Optimisation Gradle
+      - name: ☕ • Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
@@ -73,7 +79,6 @@ jobs:
       
       - name: 📝 • Configure Gradle Memory (Optimisation)
         run: |
-
           echo "org.gradle.jvmargs=-Xmx8g -Dorg.gradle.daemon=true -Dorg.gradle.parallel=true" >> android/gradle.properties
 
 
@@ -152,7 +157,7 @@ jobs:
 
   # ===== iOS BUILD (NON MODIFIÉ) =====
   build_ios:
-    needs: clean
+    needs: clean # N'utilise pas clean_cache, donc doit dépendre du job clean originel
     runs-on: macos-latest
     if: ${{ inputs.build_ios }}
     steps:
