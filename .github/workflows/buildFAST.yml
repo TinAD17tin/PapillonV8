@@ -24,7 +24,7 @@ on:
         default: false
 
 jobs:
-  # ===== CLEAN JOB (MODIFIÉ) =====
+  # ===== CLEAN JOB =====
   clean:
     runs-on: ubuntu-latest
     # Le clean s'exécute uniquement si build_android EST demandée ET clean_cache EST coché.
@@ -36,10 +36,9 @@ jobs:
           rm -rf $HOME/.gradle/caches/
           rm -rf node_modules
 
-  # ===== ANDROID BUILD - OPTIMISÉ ET CORRIGÉ =====
+  # ===== ANDROID BUILD =====
   build_android:
-    # CORRECTION APPLIQUÉE ICI pour la dépendance conditionnelle
-    needs: ${{ fromJson(format('{0}', inputs.clean_cache && '["clean"]' || '[]')) }}
+    needs: ${{ inputs.clean_cache && fromJson('["clean"]') || fromJson('[]') }}
     runs-on: ubuntu-latest
     if: ${{ inputs.build_android }}
     steps:
@@ -57,7 +56,6 @@ jobs:
       - name: 🔨 • Prebuild Android
         run: npx expo prebuild -p android --clean
 
-      # NOUVELLE ÉTAPE CLÉ POUR LA VITESSE : Cache Gradle
       - name: 📦 • Cache Gradle Dependencies
         uses: actions/cache@v4
         with:
@@ -67,10 +65,8 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-        # Le cache est ignoré si l'utilisateur a demandé de ne pas l'utiliser (et le clean job a déjà fait le ménage)
         if: ${{ !inputs.clean_cache }}
-
-      # NOUVELLE ÉTAPE CLÉ POUR LA VITESSE : Setup Java + Optimisation Gradle
+     
       - name: ☕ • Setup Java
         uses: actions/setup-java@v4
         with:
@@ -95,7 +91,7 @@ jobs:
           path: android/app/build/outputs/apk/release/Papillon.apk
           if-no-files-found: error
 
-  # ===== ANDROID SIGNING (NON MODIFIÉ) =====
+  # ===== ANDROID SIGNING =====
   sign_android:
     needs: build_android
     runs-on: ubuntu-latest
@@ -155,7 +151,7 @@ jobs:
           path: Papillon-signed.apk
           if-no-files-found: error
 
-  # ===== iOS BUILD (NON MODIFIÉ) =====
+  # ===== iOS BUILD =====
   build_ios:
     needs: clean # N'utilise pas clean_cache, donc doit dépendre du job clean originel
     runs-on: macos-latest
@@ -206,7 +202,7 @@ jobs:
           path: ios/build/Papillon.ipa
           if-no-files-found: error
 
-  # ===== iOS SIGNING (NON MODIFIÉ) =====
+  # ===== iOS SIGNING =====
   sign_ios:
     needs: build_ios
     runs-on: macos-latest
@@ -278,7 +274,7 @@ jobs:
           path: Papillon-signed.ipa
           if-no-files-found: error
 
-  # ===== SUMMARY (NON MODIFIÉ) =====
+  # ===== SUMMARY =====
   summary:
     needs: [build_android, build_ios, sign_android, sign_ios]
     runs-on: ubuntu-latest
