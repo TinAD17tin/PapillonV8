@@ -18,52 +18,70 @@ on:
         description: 'Sign iOS IPA'
         type: boolean
         default: false
+      clean_cache:
+        description: 'Disable all caches (slower but ensures a fresh build)'
+        type: boolean
+        default: false
 
 jobs:
+  # ===== CLEAN JOB =====
   clean:
     runs-on: ubuntu-latest
-    if: ${{ inputs.build_android || inputs.build_ios }}
+    # Le clean s'exécute uniquement si build_android EST demandée ET clean_cache EST coché.
+    if: ${{ inputs.build_android && inputs.clean_cache }}
     steps:
-      - name: 🧹 • Clean Environment
+      - name: 🧹 • Clean Gradle Cache
         run: |
-          rm -rf node_modules
-          rm -rf ~/Library/Developer/Xcode/DerivedData
+          echo "Désactivation du cache demandée. Suppression des caches Gradle."
           rm -rf $HOME/.gradle/caches/
+          rm -rf node_modules
 
   # ===== ANDROID BUILD =====
   build_android:
-    needs: clean
+    needs: ${{ inputs.clean_cache && fromJson('["clean"]') || fromJson('[]') }}
     runs-on: ubuntu-latest
     if: ${{ inputs.build_android }}
     steps:
       - uses: actions/checkout@v4
-     
+
       - name: 📀 • Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          
+
+      - name: 🗂️ • Install Node Dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: 🔨 • Prebuild Android
+        run: npx expo prebuild -p android --clean
+
+      - name: 📦 • Cache Gradle Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+        if: ${{ !inputs.clean_cache }}
+
       - name: ☕ • Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-          
-      - name: 🗂️ • Install Node Dependencies
-        run: npm ci --legacy-peer-deps
-        
-      - name: 🔨 • Prebuild Android
-        run: npx expo prebuild -p android --clean
 
-      - name: 📝 • Configure Gradle Memory
+      - name: 📝 • Configure Gradle Memory (Optimisation)
         run: |
-          echo "org.gradle.jvmargs=-Xmx8g -Dorg.gradle.daemon=true" >> android/gradle.properties
+          echo "org.gradle.jvmargs=-Xmx8g -Dorg.gradle.daemon=true -Dorg.gradle.parallel=true" >> android/gradle.properties
+
 
       - name: 🏗️ • Build Android
         run: |
           cd android
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --parallel
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Papillon.apk
 
       - name: 🌍 • Upload APK
@@ -135,21 +153,21 @@ jobs:
 
   # ===== iOS BUILD =====
   build_ios:
-    needs: clean
+    needs: clean # N'utilise pas clean_cache, donc doit dépendre du job clean originel
     runs-on: macos-latest
     if: ${{ inputs.build_ios }}
     steps:
       - uses: actions/checkout@v4
-     
+
       - name: 📀 • Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          
+
       - name: 🗂️ • Install Node Dependencies
         run: npm ci --legacy-peer-deps
-        
+
       - name: 🔨 • Prebuild iOS
         run: npx expo prebuild -p ios --clean
 
