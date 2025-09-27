@@ -1,4 +1,5 @@
 name: Build Applications
+
 on:
   workflow_dispatch:
     inputs:
@@ -27,7 +28,6 @@ jobs:
   # ===== CLEAN JOB =====
   clean:
     runs-on: ubuntu-latest
-    # Le clean s'exécute uniquement si build_android EST demandée ET clean_cache EST coché.
     if: ${{ inputs.build_android && inputs.clean_cache }}
     steps:
       - name: 🧹 • Clean Gradle Cache
@@ -38,9 +38,9 @@ jobs:
 
   # ===== ANDROID BUILD =====
   build_android:
-    needs: ${{ inputs.clean_cache && fromJson('["clean"]') || fromJson('[]') }}
     runs-on: ubuntu-latest
     if: ${{ inputs.build_android }}
+    needs: [clean]
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +57,7 @@ jobs:
         run: npx expo prebuild -p android --clean
 
       - name: 📦 • Cache Gradle Dependencies
+        if: ${{ !inputs.clean_cache }}
         uses: actions/cache@v4
         with:
           path: |
@@ -65,7 +66,6 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-        if: ${{ !inputs.clean_cache }}
 
       - name: ☕ • Setup Java
         uses: actions/setup-java@v4
@@ -74,9 +74,7 @@ jobs:
           java-version: '17'
 
       - name: 📝 • Configure Gradle Memory (Optimisation)
-        run: |
-          echo "org.gradle.jvmargs=-Xmx8g -Dorg.gradle.daemon=true -Dorg.gradle.parallel=true" >> android/gradle.properties
-
+        run: echo "org.gradle.jvmargs=-Xmx8g -Dorg.gradle.daemon=true -Dorg.gradle.parallel=true" >> android/gradle.properties
 
       - name: 🏗️ • Build Android
         run: |
@@ -93,8 +91,8 @@ jobs:
 
   # ===== ANDROID SIGNING =====
   sign_android:
-    needs: build_android
     runs-on: ubuntu-latest
+    needs: build_android
     if: ${{ inputs.sign_android && inputs.build_android }}
     steps:
       - name: 🔍 • Check Android Signing Secrets
@@ -128,8 +126,7 @@ jobs:
           path: ./
 
       - name: 🔐 • Setup Android Signing
-        run: |
-          echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > release.keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > release.keystore
 
       - name: ✍️ • Sign Android APK
         run: |
@@ -140,9 +137,8 @@ jobs:
             --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
             --out Papillon-signed.apk \
             Papillon.apk
-          
-          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner verify \
-            Papillon-signed.apk
+
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner verify Papillon-signed.apk
 
       - name: 🌍 • Upload Signed APK
         uses: actions/upload-artifact@v4
@@ -153,9 +149,9 @@ jobs:
 
   # ===== iOS BUILD =====
   build_ios:
-    needs: clean # N'utilise pas clean_cache, donc doit dépendre du job clean originel
     runs-on: macos-latest
     if: ${{ inputs.build_ios }}
+    needs: [clean]
     steps:
       - uses: actions/checkout@v4
 
@@ -204,8 +200,8 @@ jobs:
 
   # ===== iOS SIGNING =====
   sign_ios:
-    needs: build_ios
     runs-on: macos-latest
+    needs: build_ios
     if: ${{ inputs.sign_ios && inputs.build_ios }}
     steps:
       - name: 🔍 • Check iOS Signing Secrets
@@ -233,110 +229,6 @@ jobs:
       - name: 🔐 • Setup iOS Signing
         run: |
           echo "${{ secrets.IOS_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
-          
+
           KEYCHAIN_PASSWORD="temp-build-$(date +%s)"
-          
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -lut 21600 build.keychain
-          
-          security import certificate.p12 -k build.keychain -P "${{ secrets.IOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          
-          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
-
-      - name: ✍️ • Sign iOS IPA
-        run: |
-          mkdir -p TempPayload
-          cd TempPayload
-          unzip -q ../Papillon.ipa
-          
-          echo "🔍 Auto-detecting signing identity..."
-          SIGN_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep -o '"[^"]*"' | head -1 | tr -d '"')
-          
-          echo "✍️ Signing with development certificate..."
-          codesign --force --sign "$SIGN_IDENTITY" \
-                   --timestamp \
-                   Payload/Papillon.app
-          
-          echo "🔍 Verifying signature..."
-          codesign --verify --verbose Payload/Papillon.app
-          
-          zip -r ../Papillon-signed.ipa Payload
-          cd ..
-          rm -rf TempPayload
-
-      - name: 🌍 • Upload Signed IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ipa-signed
-          path: Papillon-signed.ipa
-          if-no-files-found: error
-
-  # ===== SUMMARY =====
-  summary:
-    needs: [build_android, build_ios, sign_android, sign_ios]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: 📋 • Build Summary
-        run: |
-          APP_VERSION=$(node -p "require('./package.json').version")
-          
-          COMMIT_ID=$(git rev-parse --short HEAD)
-          
-          echo "## Build Summary 📱" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📙 **App Version**: $APP_VERSION ($COMMIT_ID)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "🤖 **Android APK**:" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.build_android }}" == "true" ]; then
-            if [ "${{ needs.build_android.result }}" == "success" ]; then
-              echo "   - 📦 Unsigned APK: ✅ Success" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "   - 📦 Unsigned APK: ❌ Failed" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            if [ "${{ inputs.sign_android }}" == "true" ]; then
-              if [ "${{ needs.sign_android.result }}" == "success" ]; then
-                echo "   - ✍️ Signed APK: ✅ Success" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "   - ✍️ Signed APK: ❌ Failed" >> $GITHUB_STEP_SUMMARY
-              fi
-            else
-              echo "   - ✍️ Signed APK: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "   - 📦 Unsigned APK: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
-            echo "   - ✍️ Signed APK: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "🍎 **iOS IPA**:" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.build_ios }}" == "true" ]; then
-            if [ "${{ needs.build_ios.result }}" == "success" ]; then
-              echo "   - 📦 Unsigned IPA: ✅ Success" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "   - 📦 Unsigned IPA: ❌ Failed" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            if [ "${{ inputs.sign_ios }}" == "true" ]; then
-              if [ "${{ needs.sign_ios.result }}" == "success" ]; then
-                echo "   - ✍️ Signed IPA: ✅ Success" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "   - ✍️ Signed IPA: ❌ Failed" >> $GITHUB_STEP_SUMMARY
-              fi
-            else
-              echo "   - ✍️ Signed IPA: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "   - 📦 Unsigned IPA: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
-            echo "   - ✍️ Signed IPA: ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
-          fi
+          security create
