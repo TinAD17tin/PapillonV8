@@ -132,7 +132,9 @@ const IndexScreen = () => {
     const result = [...current, ...next]
     const newHomeworks: Record<string, Homework> = {};
     for (const hw of result) {
-      const id = generateId(hw.subject + hw.content + hw.createdByAccount);
+      const id = generateId(
+        hw.subject + hw.content + hw.createdByAccount + hw.dueDate.toDateString()
+      );
       newHomeworks[id] = hw;
     }
     setFreshHomeworks(newHomeworks);
@@ -141,7 +143,9 @@ const IndexScreen = () => {
 
   async function setHomeworkAsDone(homework: Homework) {
     const manager = getManager();
-    const id = generateId(homework.subject + homework.content + homework.createdByAccount);
+    const id = generateId(
+      homework.subject + homework.content + homework.createdByAccount + homework.dueDate.toDateString()
+    );
     await manager.setHomeworkCompletion(homework, !homework.isDone);
     updateHomeworkIsDone(id, !homework.isDone)
     setRefreshTrigger(prev => prev + 1);
@@ -646,7 +650,7 @@ const IndexScreen = () => {
 
       <NativeHeaderSide side="Left">
         <NativeHeaderPressable
-          onPress={() => {
+          onPressIn={() => {
             Alert.alert("Ça arrive... ✨", "Cette fonctionnalité n'est pas encore disponible.")
           }}
         >
@@ -670,7 +674,7 @@ const IndexScreen = () => {
 
       <NativeHeaderSide side="Right">
         <NativeHeaderPressable
-          onPress={() => router.navigate("/(modals)/notifications")}
+          onPressIn={() => router.navigate("/(modals)/notifications")}
         >
           <Icon size={28}>
             <Papicons name={"Bell"} color={foreground} />
