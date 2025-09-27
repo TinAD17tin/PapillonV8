@@ -49,9 +49,6 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: 🗂️ • Refaire lock
-        run: npm install
-
       - name: 🗂️ • Install Node Dependencies
         run: npm ci --legacy-peer-deps
 
